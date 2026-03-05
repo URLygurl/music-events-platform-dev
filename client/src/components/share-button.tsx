@@ -7,7 +7,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Share2, Copy, Check } from "lucide-react";
-import { SiFacebook, SiX, SiWhatsapp, SiLinkedin } from "react-icons/si";
+import { SiFacebook, SiX, SiWhatsapp } from "react-icons/si";
+import { Linkedin } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface ShareButtonProps {
@@ -106,7 +107,7 @@ export function ShareButton({
           WhatsApp
         </DropdownMenuItem>
         <DropdownMenuItem onClick={shareToLinkedIn} data-testid="share-linkedin">
-          <SiLinkedin className="w-4 h-4 mr-2" />
+          <Linkedin className="w-4 h-4 mr-2" />
           LinkedIn
         </DropdownMenuItem>
         {typeof navigator !== "undefined" && "share" in navigator && (
