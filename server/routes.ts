@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertEnquirySchema, insertArtistSchema, insertEventSchema, insertMediaItemSchema, insertDonationSchema, insertDsClientSchema } from "@shared/schema";
 import { setupAuth, registerAuthRoutes, isAuthenticated, isAdmin, isSuperAdmin } from "./auth";
-import { appendToSheet, isGoogleSheetsConnected } from "./google-sheets";
+import { appendToSheet, isGoogleSheetsConnected, testGoogleSheetsConnection } from "./google-sheets";
 import multer from "multer";
 import path from "path";
 import Papa from "papaparse";
@@ -641,6 +641,17 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error in AI chat:", error);
       res.status(500).json({ message: "AI request failed" });
+    }
+  });
+
+  // POST /api/google/test-connection — admin only: test Google Service Account connection
+  app.post("/api/google/test-connection", isAdmin, async (_req, res) => {
+    try {
+      const result = await testGoogleSheetsConnection();
+      res.json(result);
+    } catch (error) {
+      console.error("Error testing Google connection:", error);
+      res.status(500).json({ ok: false, error: "Connection test failed" });
     }
   });
 
