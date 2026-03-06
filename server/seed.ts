@@ -3,6 +3,31 @@ import { artists, events, siteSettings } from "@shared/schema";
 import { sql } from "drizzle-orm";
 
 export async function seedDatabase() {
+  // Inline schema migrations — safe to run on every startup
+  try {
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS username varchar UNIQUE`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash varchar`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS activity_log (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id varchar NOT NULL,
+        user_email varchar,
+        user_name varchar,
+        user_role varchar,
+        action varchar NOT NULL,
+        resource varchar,
+        resource_id varchar,
+        description text,
+        metadata jsonb,
+        ip_address varchar,
+        created_at timestamp DEFAULT now()
+      )
+    `);
+    console.log("[seed] Schema migrations applied successfully");
+  } catch (err) {
+    console.error("[seed] Migration warning (may already exist):", err);
+  }
+
   const [existingArtists] = await db.select({ count: sql<number>`count(*)` }).from(artists);
   if (!existingArtists || Number(existingArtists.count) === 0) {
     console.log("Seeding artists & events...");
@@ -50,6 +75,9 @@ export async function seedDatabase() {
       { key: "landing_enquiry_title", value: "Enquire / Subscribe", type: "text", section: "landing", label: "Enquiry Section Title" },
       { key: "artists_page_title", value: "Artists", type: "text", section: "artists_dir", label: "Page Title" },
       { key: "events_page_title", value: "Events", type: "text", section: "events", label: "Page Title" },
+      { key: "shop_page_title", value: "Shop", type: "text", section: "shop_page", label: "Page Title" },
+      { key: "shop_page_subtitle", value: "", type: "text", section: "shop_page", label: "Subtitle / Description" },
+      { key: "shop_page_empty_text", value: "No products available", type: "text", section: "shop_page", label: "Empty State Text" },
       { key: "ds_page_title", value: "DS", type: "text", section: "ds", label: "Page Title" },
       { key: "ds_content_text", value: "[ DS content area — customisable ]", type: "text", section: "ds", label: "Content Text" },
       { key: "ds_content_image", value: "", type: "image", section: "ds", label: "Content Image" },
@@ -77,6 +105,19 @@ export async function seedDatabase() {
     { key: "bg_events", value: "", type: "image", section: "wallpapers", label: "Events Page Background" },
     { key: "bg_ds", value: "", type: "image", section: "wallpapers", label: "DS Page Background" },
     { key: "bg_login", value: "", type: "image", section: "wallpapers", label: "Login Page Background" },
+    { key: "bg_shop", value: "", type: "image", section: "wallpapers", label: "Shop Page Background" },
+    { key: "shop_page_title", value: "Shop", type: "text", section: "shop_page", label: "Page Title" },
+    { key: "shop_page_subtitle", value: "", type: "text", section: "shop_page", label: "Subtitle / Description" },
+    { key: "shop_page_empty_text", value: "No products available", type: "text", section: "shop_page", label: "Empty State Text" },
+    { key: "menu_show_shop", value: "false", type: "toggle", section: "navigation", label: "Show Shop in Hamburger Menu" },
+    { key: "nav_show_shop", value: "false", type: "toggle", section: "navigation", label: "Show Shop in Bottom Nav" },
+    { key: "nav_shop_label", value: "Shop", type: "text", section: "navigation", label: "Shop Button Label" },
+    { key: "nav_show_donate", value: "false", type: "toggle", section: "navigation", label: "Show Donate in Bottom Nav" },
+    { key: "nav_donate_label", value: "Donate", type: "text", section: "navigation", label: "Donate Button Label" },
+    { key: "nav_show_home", value: "true", type: "toggle", section: "navigation", label: "Show Home in Bottom Nav" },
+    { key: "nav_show_artists", value: "true", type: "toggle", section: "navigation", label: "Show Artists in Bottom Nav" },
+    { key: "nav_show_events", value: "true", type: "toggle", section: "navigation", label: "Show Events in Bottom Nav" },
+    { key: "nav_show_ds", value: "true", type: "toggle", section: "navigation", label: "Show DS in Bottom Nav" },
     { key: "custom_font_name", value: "", type: "text", section: "style", label: "Custom Font Name" },
     { key: "custom_font_url", value: "", type: "text", section: "style", label: "Custom Font File URL" },
     { key: "social_instagram", value: "", type: "text", section: "social", label: "Instagram URL" },

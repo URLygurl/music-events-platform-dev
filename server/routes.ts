@@ -1,13 +1,25 @@
-import type { Express } from "express";
+import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertEnquirySchema, insertArtistSchema, insertEventSchema, insertMediaItemSchema, insertDonationSchema, insertDsClientSchema } from "@shared/schema";
-import { setupAuth, registerAuthRoutes, isAuthenticated, isAdmin, isSuperAdmin } from "./auth";
-import { appendToSheet, isGoogleSheetsConnected, testGoogleSheetsConnection } from "./google-sheets";
+import { insertEnquirySchema, insertArtistSchema, insertEventSchema, insertMediaItemSchema, insertDonationSchema, insertDsClientSchema, insertProductSchema } from "@shared/schema";
+import { setupAuth, registerAuthRoutes, isAuthenticated, isAdmin, isSuperAdmin, logActivity } from "./auth";
+import { db } from "./db";
+import { activityLog } from "@shared/models/auth";
+import { desc } from "drizzle-orm";
+import Stripe from "stripe";
+import { appendToSheet, isGoogleSheetsConfigured, testGoogleSheetsConnection } from "./google-sheets";
 import { getConciergeSettings, buildSystemPrompt, callConciergeAI, generateArtistData } from "./concierge";
 import multer from "multer";
 import path from "path";
 import Papa from "papaparse";
+
+// Helper: get Stripe instance from DB settings
+async function getStripe(): Promise<Stripe | null> {
+  const setting = await storage.getSetting("stripe_secret_key");
+  const key = setting?.value?.trim();
+  if (!key || !key.startsWith("sk_")) return null;
+  return new Stripe(key, { apiVersion: "2025-02-24.acacia" as any });
+}
 
 const ALLOWED_MIMES = ["image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"];
 const FONT_MIMES = ["font/ttf", "font/otf", "font/woff", "font/woff2", "application/font-woff", "application/font-woff2", "application/x-font-ttf", "application/x-font-otf", "application/octet-stream"];
@@ -645,40 +657,78 @@ export async function registerRoutes(
     }
   });
 
-  // GET /api/concierge/settings — public
+  // GET /api/concierge/settings — public: get concierge config for the frontend
   app.get("/api/concierge/settings", async (_req, res) => {
     try {
       const settings = await getConciergeSettings();
-      res.json({ enabled: settings.enabled, publicAccess: settings.publicAccess, name: settings.name, triviaFrequencyMins: settings.triviaFrequencyMins, hasApiKey: !!settings.apiKey });
-    } catch (error) { res.status(500).json({ message: "Failed to get concierge settings" }); }
+      // Only expose non-sensitive settings to the frontend
+      res.json({
+        enabled: settings.enabled,
+        publicAccess: settings.publicAccess,
+        name: settings.name,
+        triviaFrequencyMins: settings.triviaFrequencyMins,
+        hasApiKey: !!settings.apiKey,
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get concierge settings" });
+    }
   });
-  // POST /api/concierge/chat
+
+  // POST /api/concierge/chat — chat with the AI concierge
   app.post("/api/concierge/chat", async (req: any, res) => {
     try {
       const settings = await getConciergeSettings();
       if (!settings.enabled) return res.status(403).json({ message: "Concierge is not enabled" });
       if (!settings.apiKey) return res.status(400).json({ message: "No API key configured" });
+
       const isUserAdmin = req.user?.role === "admin" || req.user?.role === "superadmin";
-      if (!settings.publicAccess && !req.user) return res.status(401).json({ message: "Please log in to use the concierge" });
+      const isPublic = settings.publicAccess;
+      const isLoggedIn = !!req.user;
+
+      if (!isPublic && !isLoggedIn) {
+        return res.status(401).json({ message: "Please log in to use the concierge" });
+      }
+
       const { messages } = req.body;
-      if (!messages || !Array.isArray(messages)) return res.status(400).json({ message: "Messages array required" });
+      if (!messages || !Array.isArray(messages)) {
+        return res.status(400).json({ message: "Messages array required" });
+      }
+
       const systemPrompt = await buildSystemPrompt(isUserAdmin);
       const reply = await callConciergeAI(messages, systemPrompt, settings);
       res.json({ reply });
-    } catch (error: any) { res.status(500).json({ message: error.message || "Concierge request failed" }); }
+    } catch (error: any) {
+      console.error("Concierge chat error:", error);
+      res.status(500).json({ message: error.message || "Concierge request failed" });
+    }
   });
-  // POST /api/concierge/trivia
+
+  // POST /api/concierge/trivia — get a trivia fact about a playing artist
   app.post("/api/concierge/trivia", async (req: any, res) => {
     try {
       const settings = await getConciergeSettings();
-      if (!settings.enabled || !settings.apiKey) return res.status(403).json({ message: "Concierge not configured" });
-      if (!settings.publicAccess && !req.user) return res.status(401).json({ message: "Please log in" });
+      if (!settings.enabled || !settings.apiKey) {
+        return res.status(403).json({ message: "Concierge not configured" });
+      }
+      const isPublic = settings.publicAccess;
+      const isLoggedIn = !!req.user;
+      if (!isPublic && !isLoggedIn) {
+        return res.status(401).json({ message: "Please log in" });
+      }
       const systemPrompt = await buildSystemPrompt(false);
-      const reply = await callConciergeAI([{ role: "user", content: "Give me one interesting trivia fact about one of the artists playing at this event. Keep it to 2-3 sentences." }], systemPrompt, settings);
+      const reply = await callConciergeAI(
+        [{ role: "user", content: "Give me one interesting trivia fact about one of the artists playing at this event. Keep it to 2-3 sentences." }],
+        systemPrompt,
+        settings
+      );
       res.json({ trivia: reply });
-    } catch (error: any) { res.status(500).json({ message: error.message || "Trivia request failed" }); }
+    } catch (error: any) {
+      console.error("Concierge trivia error:", error);
+      res.status(500).json({ message: error.message || "Trivia request failed" });
+    }
   });
-  // POST /api/concierge/generate-artist — admin only
+
+  // POST /api/concierge/generate-artist — admin only: generate artist data using AI
   app.post("/api/concierge/generate-artist", isAdmin, async (req, res) => {
     try {
       const settings = await getConciergeSettings();
@@ -687,8 +737,12 @@ export async function registerRoutes(
       if (!artistName) return res.status(400).json({ message: "artistName required" });
       const data = await generateArtistData(artistName, settings);
       res.json(data);
-    } catch (error: any) { res.status(500).json({ message: error.message || "Artist generation failed" }); }
+    } catch (error: any) {
+      console.error("Generate artist error:", error);
+      res.status(500).json({ message: error.message || "Artist generation failed" });
+    }
   });
+
   // POST /api/google/test-connection — admin only: test Google Service Account connection
   app.post("/api/google/test-connection", isAdmin, async (_req, res) => {
     try {
@@ -698,6 +752,224 @@ export async function registerRoutes(
       console.error("Error testing Google connection:", error);
       res.status(500).json({ ok: false, error: "Connection test failed" });
     }
+  });
+
+  // GET /api/activity-log — super admin only: view all admin activity
+  app.get("/api/activity-log", isSuperAdmin, async (req, res) => {
+    try {
+      const limit = Math.min(parseInt(String(req.query.limit || "100")), 500);
+      const logs = await db
+        .select()
+        .from(activityLog)
+        .orderBy(desc(activityLog.createdAt))
+        .limit(limit);
+      res.json(logs);
+    } catch (error) {
+      console.error("Error fetching activity log:", error);
+      res.status(500).json({ message: "Failed to fetch activity log" });
+    }
+  });
+
+  // ============================================================
+  // PRODUCTS API
+  // ============================================================
+  app.get("/api/products", async (_req, res) => {
+    try {
+      const all = await storage.getProducts();
+      res.json(all.filter((p: any) => p.active));
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/products/all", isAdmin, async (_req, res) => {
+    try {
+      res.json(await storage.getProducts());
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/products", isAdmin, async (req, res) => {
+    try {
+      const data = insertProductSchema.parse(req.body);
+      const product = await storage.createProduct(data);
+      await logActivity(req, "create_product", `Created product: ${product.name}`);
+      res.json(product);
+    } catch (e: any) { res.status(400).json({ message: e.message }); }
+  });
+
+  app.put("/api/products/:id", isAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const product = await storage.updateProduct(id, req.body);
+      if (!product) return res.status(404).json({ message: "Product not found" });
+      await logActivity(req, "update_product", `Updated product: ${product.name}`);
+      res.json(product);
+    } catch (e: any) { res.status(400).json({ message: e.message }); }
+  });
+
+  app.delete("/api/products/:id", isAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteProduct(id);
+      await logActivity(req, "delete_product", `Deleted product id: ${id}`);
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ============================================================
+  // STRIPE CHECKOUT
+  // ============================================================
+
+  // GET /api/stripe/config — public: get publishable key for frontend
+  app.get("/api/stripe/config", async (_req, res) => {
+    try {
+      const setting = await storage.getSetting("stripe_publishable_key");
+      const key = setting?.value?.trim();
+      res.json({ publishableKey: key && key.startsWith("pk_") ? key : null });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // POST /api/stripe/checkout — create a Stripe Hosted Checkout session for products
+  app.post("/api/stripe/checkout", async (req: Request, res: Response) => {
+    try {
+      const stripe = await getStripe();
+      if (!stripe) return res.status(400).json({ message: "Stripe is not configured. Please add your Stripe Secret Key in the Integrations panel." });
+
+      const { items, successUrl, cancelUrl, customerEmail, metadata } = req.body;
+      if (!items || !Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ message: "No items provided" });
+      }
+
+      const lineItems = items.map((item: any) => ({
+        price_data: {
+          currency: (item.currency || "nzd").toLowerCase(),
+          product_data: {
+            name: item.name,
+            description: item.description || undefined,
+            images: item.imageUrl ? [item.imageUrl] : undefined,
+          },
+          unit_amount: Math.round(item.price),
+        },
+        quantity: item.quantity || 1,
+      }));
+
+      const origin = (req.headers.origin as string) || "https://deadsounds.live";
+      const session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        line_items: lineItems,
+        customer_email: customerEmail || undefined,
+        success_url: successUrl || `${origin}/shop?success=1`,
+        cancel_url: cancelUrl || `${origin}/shop?cancelled=1`,
+        metadata: metadata || {},
+      });
+
+      await storage.createOrder({
+        stripeSessionId: session.id,
+        customerEmail: customerEmail || null,
+        amountTotal: session.amount_total,
+        currency: session.currency,
+        status: "pending",
+        items: JSON.stringify(items),
+        metadata: JSON.stringify(metadata || {}),
+      });
+
+      res.json({ url: session.url, sessionId: session.id });
+    } catch (e: any) {
+      console.error("Stripe checkout error:", e);
+      res.status(500).json({ message: e.message || "Checkout failed" });
+    }
+  });
+
+  // POST /api/stripe/checkout-donation — Stripe Hosted Checkout for donations
+  app.post("/api/stripe/checkout-donation", async (req: Request, res: Response) => {
+    try {
+      const stripe = await getStripe();
+      if (!stripe) return res.status(400).json({ message: "Stripe is not configured. Please add your Stripe Secret Key in the Integrations panel." });
+
+      const { amount, currency, name, email, message, successUrl, cancelUrl } = req.body;
+      if (!amount || amount < 100) return res.status(400).json({ message: "Minimum donation is $1.00" });
+
+      const origin = (req.headers.origin as string) || "https://deadsounds.live";
+      const session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        line_items: [{
+          price_data: {
+            currency: (currency || "nzd").toLowerCase(),
+            product_data: { name: "Donation", description: message || "Thank you for your support!" },
+            unit_amount: Math.round(amount),
+          },
+          quantity: 1,
+        }],
+        customer_email: email || undefined,
+        success_url: successUrl || `${origin}/donate?success=1`,
+        cancel_url: cancelUrl || `${origin}/donate?cancelled=1`,
+        metadata: { type: "donation", donorName: name || "", message: message || "" },
+      });
+
+      await storage.createOrder({
+        stripeSessionId: session.id,
+        customerEmail: email || null,
+        customerName: name || null,
+        amountTotal: Math.round(amount),
+        currency: (currency || "nzd").toLowerCase(),
+        status: "pending",
+        items: JSON.stringify([{ name: "Donation", price: amount, quantity: 1 }]),
+        metadata: JSON.stringify({ type: "donation", message }),
+      });
+
+      res.json({ url: session.url, sessionId: session.id });
+    } catch (e: any) {
+      console.error("Stripe donation error:", e);
+      res.status(500).json({ message: e.message || "Donation checkout failed" });
+    }
+  });
+
+  // POST /api/stripe/webhook — Stripe webhook handler
+  app.post("/api/stripe/webhook", async (req: Request, res: Response) => {
+    try {
+      const stripe = await getStripe();
+      if (!stripe) return res.status(400).send("Stripe not configured");
+
+      const webhookSecretSetting = await storage.getSetting("stripe_webhook_secret");
+      const webhookSecret = webhookSecretSetting?.value?.trim();
+
+      let event: Stripe.Event;
+      if (webhookSecret && req.headers["stripe-signature"]) {
+        const sig = req.headers["stripe-signature"] as string;
+        try {
+          event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+        } catch (err: any) {
+          return res.status(400).send(`Webhook Error: ${err.message}`);
+        }
+      } else {
+        try {
+          const raw = Buffer.isBuffer(req.body) ? req.body.toString() : JSON.stringify(req.body);
+          event = JSON.parse(raw) as Stripe.Event;
+        } catch {
+          return res.status(400).send("Invalid JSON");
+        }
+      }
+
+      if (event.type === "checkout.session.completed") {
+        const session = event.data.object as Stripe.Checkout.Session;
+        const order = await storage.getOrderBySessionId(session.id);
+        if (order) await storage.updateOrderStatus(order.id, "paid");
+      } else if (event.type === "checkout.session.expired") {
+        const session = event.data.object as Stripe.Checkout.Session;
+        const order = await storage.getOrderBySessionId(session.id);
+        if (order) await storage.updateOrderStatus(order.id, "failed");
+      }
+
+      res.json({ received: true });
+    } catch (e: any) {
+      console.error("Webhook error:", e);
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // GET /api/orders — admin only: view all orders
+  app.get("/api/orders", isAdmin, async (_req, res) => {
+    try {
+      res.json(await storage.getOrders());
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
   return httpServer;
