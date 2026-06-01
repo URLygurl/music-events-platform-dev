@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/app-layout";
 import { ImagePlaceholder } from "@/components/image-placeholder";
+import { SmartImage } from "@/components/smart-image";
 import { useSettings } from "@/hooks/use-settings";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -8,6 +9,7 @@ import { ShareButton } from "@/components/share-button";
 import { Mail, Phone, Globe, Music, Video, LinkIcon } from "lucide-react";
 import type { DsClient } from "@shared/schema";
 import { getVisibleFields, DEFAULT_DS_CLIENT_VISIBILITY } from "@shared/schema";
+import { DSStreamingPlayer, SiteStreamingBanner } from "@/components/ds-streaming-player";
 
 function ClientProfile({ client }: { client: DsClient }) {
   const vis = getVisibleFields(client.visibleFields, DEFAULT_DS_CLIENT_VISIBILITY);
@@ -31,10 +33,11 @@ function ClientProfile({ client }: { client: DsClient }) {
       {vis.imageUrl !== false && (
         <div className="w-full">
           {client.imageUrl ? (
-            <img
+            <SmartImage
               src={client.imageUrl}
               alt={client.name}
-              className="w-full aspect-video object-cover rounded-b-2xl shadow-md"
+              className="w-full aspect-video rounded-b-2xl shadow-md"
+              focal={(vis["imageFocal"] as string) || "center"}
               data-testid={`img-ds-client-hero-${client.id}`}
             />
           ) : (
@@ -118,6 +121,14 @@ function ClientProfile({ client }: { client: DsClient }) {
           )}
         </div>
 
+        {/* Inline streaming player for song/video links */}
+        {(client.videoLink1 || client.videoLink2 || client.songLink1 || client.songLink2) && (
+          <div className="border-t pt-4">
+            <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-3">Listen / Watch</h3>
+            <DSStreamingPlayer client={client} />
+          </div>
+        )}
+
         {linkItems.some((l) => vis[l.key] !== false && l.value) && (
           <div className="border-t pt-4 space-y-2">
             <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Links</h3>
@@ -191,6 +202,7 @@ export default function DSPage() {
       <div className="px-4 py-4">
         <h2 className="text-lg font-semibold mb-4" data-testid="text-ds-title">{title}</h2>
         <div className="space-y-4">
+          <SiteStreamingBanner />
           {image ? (
             <img src={image} alt={title} className="w-full h-48 object-cover rounded-2xl shadow-md" data-testid="img-ds-content" />
           ) : (

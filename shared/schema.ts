@@ -128,6 +128,7 @@ export const products = pgTable("products", {
   stripePriceId: text("stripe_price_id"),
   stripeProductId: text("stripe_product_id"),
   sortOrder: integer("sort_order").default(0),
+  visibleFields: text("visible_fields"), // JSON: imageFocal, variants, etc.
   createdAt: timestamp("created_at").defaultNow(),
 });
 

@@ -16,7 +16,9 @@ import {
 } from "lucide-react";
 import type { MediaItem } from "@shared/schema";
 
-function extractYouTubeId(url: string): string | null {
+// ── URL parsers ──────────────────────────────────────────────────────────────
+
+export function extractYouTubeId(url: string): string | null {
   const patterns = [
     /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&?\s]+)/,
     /^([a-zA-Z0-9_-]{11})$/,
@@ -28,14 +30,44 @@ function extractYouTubeId(url: string): string | null {
   return null;
 }
 
-function extractBandcampEmbed(url: string): string | null {
-  if (url.includes("bandcamp.com")) return url;
-  const m = url.match(/album=(\d+)/);
-  if (m) return url;
+export function extractSpotifyEmbed(url: string): string | null {
+  // Convert open.spotify.com/track/... or /album/... or /playlist/... to embed URL
+  const m = url.match(/open\.spotify\.com\/(track|album|playlist|episode|show)\/([a-zA-Z0-9]+)/);
+  if (m) return `https://open.spotify.com/embed/${m[1]}/${m[2]}?utm_source=generator&theme=0`;
+  // Already an embed URL
+  if (url.includes("open.spotify.com/embed")) return url;
   return null;
 }
 
-function MediaEmbed({ item, expanded }: { item: MediaItem; expanded: boolean }) {
+export function extractAppleMusicEmbed(url: string): string | null {
+  // Convert music.apple.com/... to embed URL
+  const m = url.match(/music\.apple\.com\/([a-z]{2})\/(album|playlist|song)\/([^/]+)\/([^?]+)/);
+  if (m) return `https://embed.music.apple.com/${m[1]}/${m[2]}/${m[3]}/${m[4]}`;
+  if (url.includes("embed.music.apple.com")) return url;
+  return null;
+}
+
+// ── Detect type from URL if not specified ────────────────────────────────────
+
+export function detectMediaType(url: string): string {
+  if (!url) return "audio";
+  if (url.includes("youtube.com") || url.includes("youtu.be")) return "youtube";
+  if (url.includes("bandcamp.com")) return "bandcamp";
+  if (url.includes("soundcloud.com")) return "soundcloud";
+  if (url.includes("spotify.com")) return "spotify";
+  if (url.includes("music.apple.com") || url.includes("embed.music.apple.com")) return "apple_music";
+  return "audio";
+}
+
+// ── MediaEmbed — exported so DS page can reuse it ───────────────────────────
+
+export function MediaEmbed({
+  item,
+  expanded,
+}: {
+  item: Pick<MediaItem, "id" | "title" | "type" | "embedUrl">;
+  expanded: boolean;
+}) {
   if (item.type === "youtube") {
     const videoId = extractYouTubeId(item.embedUrl);
     if (!videoId) return <p className="text-xs text-muted-foreground">Invalid YouTube URL</p>;
@@ -54,11 +86,12 @@ function MediaEmbed({ item, expanded }: { item: MediaItem; expanded: boolean }) 
   }
 
   if (item.type === "bandcamp") {
-    const embedSrc = extractBandcampEmbed(item.embedUrl);
-    if (!embedSrc) return <p className="text-xs text-muted-foreground">Invalid Bandcamp URL</p>;
+    if (!item.embedUrl.includes("bandcamp.com")) {
+      return <p className="text-xs text-muted-foreground">Invalid Bandcamp URL</p>;
+    }
     return (
       <iframe
-        src={embedSrc}
+        src={item.embedUrl}
         className="w-full h-32 rounded-md border-0"
         seamless
         title={item.title}
@@ -83,6 +116,41 @@ function MediaEmbed({ item, expanded }: { item: MediaItem; expanded: boolean }) 
     );
   }
 
+  if (item.type === "spotify") {
+    const embedSrc = extractSpotifyEmbed(item.embedUrl);
+    if (!embedSrc) return <p className="text-xs text-muted-foreground">Invalid Spotify URL</p>;
+    return (
+      <iframe
+        src={embedSrc}
+        width="100%"
+        height={expanded ? "352" : "152"}
+        frameBorder="0"
+        allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+        loading="lazy"
+        className="rounded-xl"
+        title={item.title}
+        data-testid={`player-spotify-${item.id}`}
+      />
+    );
+  }
+
+  if (item.type === "apple_music") {
+    const embedSrc = extractAppleMusicEmbed(item.embedUrl);
+    if (!embedSrc) return <p className="text-xs text-muted-foreground">Invalid Apple Music URL</p>;
+    return (
+      <iframe
+        allow="autoplay *; encrypted-media *; fullscreen *; clipboard-write"
+        frameBorder="0"
+        height={expanded ? "450" : "175"}
+        style={{ width: "100%", maxWidth: "660px", overflow: "hidden", borderRadius: "10px" }}
+        sandbox="allow-forms allow-popups allow-same-origin allow-scripts allow-storage-access-by-user-activation allow-top-navigation-by-user-activation"
+        src={embedSrc}
+        title={item.title}
+        data-testid={`player-apple-music-${item.id}`}
+      />
+    );
+  }
+
   if (item.type === "audio") {
     return (
       <audio controls autoPlay className="w-full" data-testid={`player-audio-${item.id}`}>
@@ -93,6 +161,8 @@ function MediaEmbed({ item, expanded }: { item: MediaItem; expanded: boolean }) 
 
   return <p className="text-xs text-muted-foreground">Unsupported media type</p>;
 }
+
+// ── MediaPlayer — full playlist player used on landing page ─────────────────
 
 export function MediaPlayer() {
   const { data: mediaItems, isLoading } = useQuery<MediaItem[]>({

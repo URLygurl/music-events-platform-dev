@@ -1,7 +1,9 @@
 import { Link } from "wouter";
 import { Play } from "lucide-react";
 import { ImagePlaceholder } from "./image-placeholder";
+import { SmartImage } from "./smart-image";
 import type { Artist } from "@shared/schema";
+import { getVisibleFields } from "@shared/schema";
 
 interface ArtistTileProps {
   artist: Artist;
@@ -17,10 +19,11 @@ export function ArtistTile({ artist }: ArtistTileProps) {
       >
         <div className="relative">
           {artist.imageUrl && artist.imageUrl !== "" ? (
-            <img
+            <SmartImage
               src={artist.imageUrl}
               alt={artist.name}
-              className="w-full aspect-square object-cover"
+              className="w-full aspect-square"
+              focal={getVisibleFields(artist.visibleFields)["imageFocal"] as string | undefined || "center"}
             />
           ) : (
             <ImagePlaceholder label={artist.name} className="w-full aspect-square" />

@@ -149,7 +149,7 @@ export async function setupAuth(app: Express) {
 
 // ─── Auth middleware ──────────────────────────────────────────────────────────
 
-async function getSessionUser(req: any) {
+export async function getSessionUser(req: any) {
   if (!req.session?.userId) return null;
   const [user] = await db.select().from(users).where(eq(users.id, req.session.userId));
   return user || null;
