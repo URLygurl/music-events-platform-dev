@@ -120,13 +120,13 @@ type TabId = "overview" | "activity" | "chat" | "squad" | "settings";
 // ─── Tier colours (matching naked-staff palette) ───────────────────────────
 
 const TIER_COLORS: Record<string, string> = {
-  MASTER:   "#d94a1f",
-  CREATIVE: "#7a2e0d",
-  STUDIO:   "#3d5a1f",
-  LIVE:     "#5c3a0e",
-  BUSINESS: "#1f3a5c",
-  CAMPAIGN: "#5c1f4a",
-  TRADES:   "#3a3d45",
+  MASTER:   "#9a3412",
+  CREATIVE: "#b45309",
+  STUDIO:   "#166534",
+  LIVE:     "#9a3412",
+  BUSINESS: "#1e40af",
+  CAMPAIGN: "#6b21a8",
+  TRADES:   "#374151",
 };
 
 // ─── Helper: format relative time ─────────────────────────────────────────
@@ -508,7 +508,7 @@ function SquadTab({
               <div key={tier}>
                 <div
                   className="text-xs font-mono tracking-widest uppercase px-2 py-1 rounded mb-2 inline-block text-white"
-                  style={{ background: TIER_COLORS[tier] || "#333" }}
+                  style={{ background: TIER_COLORS[tier] || "#57534e" }}
                 >
                   {tier}
                 </div>
