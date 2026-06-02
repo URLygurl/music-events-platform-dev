@@ -20,7 +20,7 @@ import session from "express-session";
 import connectPg from "connect-pg-simple";
 import type { Express, RequestHandler } from "express";
 import { db } from "./db";
-import { users } from "@shared/models/auth";
+import { users, activityLog } from "@shared/models/auth";
 import { eq } from "drizzle-orm";
 
 // ─── Session setup ────────────────────────────────────────────────────────────
@@ -67,11 +67,17 @@ export async function setupAuth(app: Express) {
   app.post("/api/login", async (req, res) => {
     const { username, password } = req.body as { username?: string; password?: string };
 
-    const adminUsername = process.env.ADMIN_USERNAME || "admin";
-    const adminPassword = process.env.ADMIN_PASSWORD;
+    // Support both SUPERADMIN_* and ADMIN_* env var naming conventions
+    const adminUsername =
+      process.env.SUPERADMIN_USERNAME ||
+      process.env.ADMIN_USERNAME ||
+      "admin";
+    const adminPassword =
+      process.env.SUPERADMIN_PASSWORD ||
+      process.env.ADMIN_PASSWORD;
 
     if (!adminPassword) {
-      return res.status(500).json({ message: "Server not configured: ADMIN_PASSWORD env var missing" });
+      return res.status(500).json({ message: "Server not configured: set SUPERADMIN_PASSWORD or ADMIN_PASSWORD env var" });
     }
 
     if (username !== adminUsername || password !== adminPassword) {
@@ -79,7 +85,10 @@ export async function setupAuth(app: Express) {
     }
 
     // Upsert the admin user in the DB so role lookups work
-    const adminEmail = process.env.ADMIN_EMAIL || "melbazpeach@gmail.com";
+    const adminEmail =
+      process.env.SUPERADMIN_EMAIL ||
+      process.env.ADMIN_EMAIL ||
+      "melbazpeach@gmail.com";
 
     // Find existing user by email
     const [existing] = await db.select().from(users).where(eq(users.email, adminEmail));
@@ -184,3 +193,32 @@ export const isSuperAdmin: RequestHandler = async (req, res, next) => {
 
 // Stub for registerAuthRoutes (was a no-op in Replit Auth too, routes are registered in setupAuth)
 export function registerAuthRoutes(_app: Express) {}
+
+// ─── Activity logging ─────────────────────────────────────────────────────────
+
+/**
+ * Log an admin/system action to the activity_log table.
+ * Silently swallows errors so a logging failure never breaks a request.
+ */
+export async function logActivity(
+  req: any,
+  action: string,
+  details?: string,
+  entityType?: string,
+  entityId?: number,
+  agent = "system"
+): Promise<void> {
+  try {
+    const userId = req?.session?.user?.id ?? req?.user?.id ?? null;
+    await db.insert(activityLog).values({
+      action,
+      details: details ?? null,
+      entityType: entityType ?? null,
+      entityId: entityId ?? null,
+      userId: userId ? String(userId) : null,
+      agent,
+    });
+  } catch {
+    // Never throw — logging should never break a request
+  }
+}
