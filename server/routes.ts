@@ -8,7 +8,7 @@ import { db } from "./db";
 import { activityLog } from "@shared/models/auth";
 import { desc } from "drizzle-orm";
 import Stripe from "stripe";
-import { appendToSheet, isGoogleSheetsConfigured, testGoogleSheetsConnection } from "./google-sheets";
+import { appendToSheet, isGoogleSheetsConnected, testGoogleSheetsConnection } from "./google-sheets";
 import { getConciergeSettings, buildSystemPrompt, callConciergeAI, generateArtistData } from "./concierge";
 import multer from "multer";
 import path from "path";
