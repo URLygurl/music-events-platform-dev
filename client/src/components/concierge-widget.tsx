@@ -70,9 +70,13 @@ export function ConciergeWidget() {
       setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
     },
     onError: (error: any) => {
+      const raw = error.message || "";
+      const friendly = raw.includes("401") || raw.toLowerCase().includes("log in")
+        ? "You need to be logged in to chat with me. Log in above and come back! 🎵"
+        : raw || "Sorry, I couldn't process that. Please try again.";
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: error.message || "Sorry, I couldn't process that. Please try again." },
+        { role: "assistant", content: friendly },
       ]);
     },
   });

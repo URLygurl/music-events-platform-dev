@@ -808,18 +808,18 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  app.get("/api/products/all", isAdmin, async (_req, res) => {
+    try {
+      res.json(await storage.getProducts());
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
   app.get("/api/products/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const product = await storage.getProduct(id);
       if (!product || !product.active) return res.status(404).json({ message: "Product not found" });
       res.json(product);
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
-  app.get("/api/products/all", isAdmin, async (_req, res) => {
-    try {
-      res.json(await storage.getProducts());
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
